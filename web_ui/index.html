@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaCrawler 控制面板</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script type="module" src="/static/main.js" defer></script>
+</head>
+<body>
+    <div class="app">
+        <header class="app-header">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🕷️</span>
+                    <div>
+                        <h1>MediaCrawler 控制面板</h1>
+                        <p>可视化管理 · 实时监控 · 断点续爬</p>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-outline" id="refreshStatusBtn">
+                        <span>刷新状态</span>
+                    </button>
+                    <span class="status-indicator" id="statusIndicator">未运行</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <section class="card">
+                <div class="card-header">
+                    <div>
+                        <h2>爬虫控制</h2>
+                        <p>选择平台并配置爬虫参数</p>
+                    </div>
+                    <div class="status-badge" id="crawlerStatusBadge">
+                        <span class="badge-dot"></span>
+                        <span>准备就绪</span>
+                    </div>
+                </div>
+
+                <form id="crawlerForm" class="form-grid">
+                    <div class="form-field">
+                        <label for="platform">平台</label>
+                        <div class="platform-options" id="platformOptions"></div>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="keywords">关键词</label>
+                        <input type="text" id="keywords" name="keywords" placeholder="例如：编程副业,自媒体运营" />
+                    </div>
+
+                    <div class="form-field">
+                        <label for="crawlerType">爬取类型</label>
+                        <select id="crawlerType" name="crawler_type">
+                            <option value="search">关键词搜索</option>
+                            <option value="detail">帖子详情</option>
+                            <option value="creator">创作者主页</option>
+                        </select>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="loginType">登录方式</label>
+                        <select id="loginType" name="login_type">
+                            <option value="qrcode">二维码登录</option>
+                            <option value="phone">短信验证码</option>
+                            <option value="cookie">Cookie 登录</option>
+                        </select>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="maxNotes">最大帖子数</label>
+                        <input type="number" id="maxNotes" name="max_notes" min="1" max="500" value="15" />
+                    </div>
+
+                    <div class="form-field">
+                        <label for="maxComments">每帖最大评论数</label>
+                        <input type="number" id="maxComments" name="max_comments" min="0" max="1000" value="10" />
+                    </div>
+
+                    <div class="form-field">
+                        <label>功能设置</label>
+                        <div class="toggle-group">
+                            <label class="switch">
+                                <input type="checkbox" id="enableComments" name="enable_comments" checked />
+                                <span>爬取评论</span>
+                            </label>
+                            <label class="switch">
+                                <input type="checkbox" id="enableSubComments" name="enable_sub_comments" />
+                                <span>爬取二级评论</span>
+                            </label>
+                            <label class="switch">
+                                <input type="checkbox" id="enableResume" name="enable_resume" checked />
+                                <span>断点续爬</span>
+                            </label>
+                            <label class="switch">
+                                <input type="checkbox" id="headless" name="headless" />
+                                <span>无头模式</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="saveOption">数据存储</label>
+                        <select id="saveOption" name="save_data_option">
+                            <option value="json">JSON 文件</option>
+                            <option value="csv">CSV 文件</option>
+                            <option value="sqlite">SQLite 数据库</option>
+                            <option value="db">MySQL 数据库</option>
+                        </select>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary" id="startCrawlerBtn">启动爬虫</button>
+                        <button type="button" class="btn btn-outline" id="stopCrawlerBtn">停止爬虫</button>
+                    </div>
+                </form>
+            </section>
+
+            <section class="grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>运行状态</h2>
+                            <p>实时监控爬虫进度与日志</p>
+                        </div>
+                    </div>
+
+                    <div class="status-grid">
+                        <div class="status-card">
+                            <span class="label">当前状态</span>
+                            <strong id="statusText">未运行</strong>
+                        </div>
+                        <div class="status-card">
+                            <span class="label">开始时间</span>
+                            <strong id="startTime">-</strong>
+                        </div>
+                        <div class="status-card">
+                            <span class="label">已爬帖子</span>
+                            <strong id="notesCount">0</strong>
+                        </div>
+                        <div class="status-card">
+                            <span class="label">已爬评论</span>
+                            <strong id="commentsCount">0</strong>
+                        </div>
+                    </div>
+
+                    <div class="progress">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+
+                    <div class="log-viewer" id="logViewer">
+                        <div class="log-entry --muted">等待任务启动...</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>断点续爬</h2>
+                            <p>查看和管理检查点记录</p>
+                        </div>
+                    </div>
+
+                    <div class="checkpoint-list" id="checkpointList">
+                        <div class="checkpoint-empty">暂无检查点记录</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="card-header">
+                    <div>
+                        <h2>数据中心</h2>
+                        <p>浏览、预览和下载爬取的数据</p>
+                    </div>
+                    <div class="tabs" role="tablist">
+                        <button class="tab active" data-type="json">JSON</button>
+                        <button class="tab" data-type="csv">CSV</button>
+                    </div>
+                </div>
+
+                <div class="data-table" id="dataTable">
+                    <div class="data-empty">暂无数据文件</div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="app-footer">
+            <span>📡 MediaCrawler 现代化控制面板 · FastAPI + 原生 JS</span>
+            <span>当前版本：v2.0.0</span>
+        </footer>
+    </div>
+
+    <template id="checkpointTemplate">
+        <div class="checkpoint-card">
+            <div class="checkpoint-info">
+                <div class="checkpoint-id"></div>
+                <div class="checkpoint-meta"></div>
+            </div>
+            <div class="checkpoint-actions">
+                <button class="btn btn-small btn-primary" data-action="resume">恢复</button>
+                <button class="btn btn-small btn-outline" data-action="download">下载</button>
+            </div>
+        </div>
+    </template>
+
+    <template id="dataRowTemplate">
+        <div class="data-row">
+            <div class="file-name"></div>
+            <div class="file-size"></div>
+            <div class="file-time"></div>
+            <div class="file-actions">
+                <button class="btn btn-small btn-outline" data-action="preview">预览</button>
+                <button class="btn btn-small btn-primary" data-action="download">下载</button>
+                <button class="btn btn-small btn-danger" data-action="delete">删除</button>
+            </div>
+        </div>
+    </template>
+
+    <div class="modal" id="previewModal" role="dialog" aria-modal="true">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>数据预览</h3>
+                <button class="modal-close" id="modalCloseBtn">&times;</button>
+            </div>
+            <div class="modal-body" id="modalContent">加载中...</div>
+        </div>
+        <div class="modal-mask" id="modalMask"></div>
+    </div>
+</body>
+</html>
