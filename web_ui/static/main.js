@@ -8,7 +8,9 @@ const state = {
   crawlerStatus: null,
   checkpoints: [],
   dataFiles: [],
-  activeDataTab: 'json'
+  activeDataTab: 'json',
+  presets: [],
+  statistics: null
 };
 
 // Utility Functions
@@ -134,10 +136,34 @@ const renderCheckpoints = () => {
     });
 
     clone.querySelector('[data-action="download"]').addEventListener('click', () => {
-      window.open(`/api/data/download/${checkpoint.file}`);
+      window.open(`/api/checkpoints/download/${encodeURIComponent(checkpoint.id)}`);
     });
 
     container.appendChild(clone);
+  });
+};
+
+const renderPresets = () => {
+  const container = document.getElementById('presetContainer');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  if (!state.presets.length) {
+    const hint = document.createElement('div');
+    hint.className = 'preset-empty';
+    hint.textContent = '暂无保存的配置预设';
+    container.appendChild(hint);
+    return;
+  }
+  
+  state.presets.forEach((preset) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'preset-btn';
+    button.textContent = preset.name;
+    button.addEventListener('click', () => loadPresetConfig(preset.name));
+    container.appendChild(button);
   });
 };
 
@@ -158,14 +184,23 @@ const renderDataTable = () => {
 
   filteredFiles.forEach((file) => {
     const clone = template.content.cloneNode(true);
-    clone.querySelector('.file-name').textContent = file.name;
+    const fileNameEl = clone.querySelector('.file-name');
+    fileNameEl.textContent = file.name;
+    if (file.directory) {
+      const meta = document.createElement('div');
+      meta.className = 'file-meta';
+      meta.textContent = file.directory;
+      fileNameEl.appendChild(meta);
+    }
+
     clone.querySelector('.file-size').textContent = formatBytes(file.size);
     clone.querySelector('.file-time').textContent = formatDateTime(file.modified);
 
+    const encodedPath = file.path.split('/').map(encodeURIComponent).join('/');
     const actions = clone.querySelector('.file-actions');
-    actions.querySelector('[data-action="preview"]').addEventListener('click', () => previewData(file.name));
-    actions.querySelector('[data-action="download"]').addEventListener('click', () => window.open(`/api/data/download/${file.name}`));
-    actions.querySelector('[data-action="delete"]').addEventListener('click', () => deleteData(file.name));
+    actions.querySelector('[data-action="preview"]').addEventListener('click', () => previewData(file.path));
+    actions.querySelector('[data-action="download"]').addEventListener('click', () => window.open(`/api/data/download/${encodedPath}`));
+    actions.querySelector('[data-action="delete"]').addEventListener('click', () => deleteData(file.path));
 
     container.appendChild(clone);
   });
@@ -235,7 +270,7 @@ const startCrawler = async (config) => {
     });
     showToast('爬虫任务已启动', 'success');
     addLog(`任务启动: ${config.platform} / ${config.crawler_type}`);
-    await fetchStatus();
+    await Promise.all([fetchStatus(), fetchStatistics()]);
   } catch (err) {
     showToast(err.message, 'error');
     addLog(`任务启动失败: ${err.message}`, 'error');
@@ -250,7 +285,7 @@ const stopCrawler = async () => {
     if (data.checkpoint) {
       addLog(`已创建检查点: ${data.checkpoint}`, 'success');
     }
-    await Promise.all([fetchStatus(), fetchCheckpoints()]);
+    await Promise.all([fetchStatus(), fetchCheckpoints(), fetchStatistics()]);
   } catch (err) {
     showToast(err.message, 'error');
     addLog(`停止任务失败: ${err.message}`, 'error');
@@ -265,20 +300,43 @@ const resumeCrawler = async (checkpointId) => {
     });
     showToast(`已从检查点恢复: ${checkpointId}`, 'success');
     addLog(`从检查点恢复: ${checkpointId}`);
-    await fetchStatus();
+    await Promise.all([fetchStatus(), fetchStatistics()]);
   } catch (err) {
     showToast(err.message, 'error');
     addLog(`恢复失败: ${err.message}`, 'error');
   }
 };
 
-const previewData = async (filename) => {
+const pauseCrawler = async () => {
   try {
-    const data = await api(`/data/preview/${encodeURIComponent(filename)}`);
+    const data = await api('/crawler/pause', { method: 'POST' });
+    showToast('已保存当前进度', 'info');
+    addLog('任务已暂停并保存检查点');
+    if (data.checkpoint) {
+      addLog(`创建检查点: ${data.checkpoint}`, 'success');
+    }
+    await Promise.all([fetchStatus(), fetchCheckpoints(), fetchStatistics()]);
+  } catch (err) {
+    showToast(err.message, 'error');
+    addLog(`暂停任务失败: ${err.message}`, 'error');
+  }
+};
+
+const previewData = async (filepath) => {
+  try {
+    const encodedPath = filepath.split('/').map(encodeURIComponent).join('/');
+    const data = await api(`/data/preview/${encodedPath}?limit=50`);
     const modal = document.getElementById('previewModal');
     const content = document.getElementById('modalContent');
 
-    content.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+    if (data.truncated) {
+      content.innerHTML = `
+        <div class="preview-info">显示前 ${data.data.length} 条，共 ${data.total} 条记录</div>
+        <pre>${JSON.stringify(data.data, null, 2)}</pre>
+      `;
+    } else {
+      content.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+    }
     modal.classList.add('active');
   } catch (err) {
     showToast(err.message, 'error');
@@ -289,13 +347,98 @@ const deleteData = async (filename) => {
   if (!confirm(`确定要删除 ${filename} 吗？`)) return;
 
   try {
-    await api(`/data/delete/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    const encodedPath = filename.split('/').map(encodeURIComponent).join('/');
+    await api(`/data/delete/${encodedPath}`, { method: 'DELETE' });
     showToast('文件已删除', 'info');
     addLog(`删除数据文件: ${filename}`);
-    await fetchDataFiles();
+    await Promise.all([fetchDataFiles(), fetchStatistics()]);
   } catch (err) {
     showToast(err.message, 'error');
   }
+};
+
+const fetchPresets = async () => {
+  try {
+    const data = await api('/presets');
+    state.presets = data.presets;
+    renderPresets();
+  } catch (err) {
+    console.error('获取预设失败:', err);
+  }
+};
+
+const saveCurrentConfig = async () => {
+  const form = document.getElementById('crawlerForm');
+  const formData = new FormData(form);
+  const config = Object.fromEntries(formData.entries());
+  
+  const booleanFields = ['enable_comments', 'enable_sub_comments', 'enable_resume', 'headless'];
+  booleanFields.forEach((field) => (config[field] = formData.get(field) === 'on'));
+  
+  config.platform = state.selectedPlatform;
+  config.max_notes = Number(config.max_notes);
+  config.max_comments = Number(config.max_comments);
+  
+  const name = prompt('请输入配置预设名称:');
+  if (!name) return;
+  
+  try {
+    await api('/presets', {
+      method: 'POST',
+      body: JSON.stringify({ name, config })
+    });
+    showToast('配置已保存', 'success');
+    await fetchPresets();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+const loadPresetConfig = async (presetName) => {
+  const preset = state.presets.find(p => p.name === presetName);
+  if (!preset) return;
+  
+  const form = document.getElementById('crawlerForm');
+  const config = preset.config;
+  
+  state.selectedPlatform = config.platform;
+  renderPlatforms();
+  
+  form.keywords.value = config.keywords || '';
+  form.crawler_type.value = config.crawler_type || 'search';
+  form.login_type.value = config.login_type || 'qrcode';
+  form.max_notes.value = config.max_notes || 15;
+  form.max_comments.value = config.max_comments || 10;
+  form.enable_comments.checked = config.enable_comments !== false;
+  form.enable_sub_comments.checked = config.enable_sub_comments === true;
+  form.enable_resume.checked = config.enable_resume !== false;
+  form.headless.checked = config.headless === true;
+  form.save_data_option.value = config.save_data_option || 'json';
+  
+  showToast(`已加载配置: ${presetName}`, 'success');
+};
+
+const fetchStatistics = async () => {
+  try {
+    const data = await api('/stats');
+    state.statistics = data;
+    updateStatistics();
+  } catch (err) {
+    console.error('获取统计信息失败:', err);
+  }
+};
+
+const updateStatistics = () => {
+  if (!state.statistics) return;
+  
+  const { data, checkpoints_count } = state.statistics;
+  const totalFiles = document.getElementById('statTotalFiles');
+  const totalSize = document.getElementById('statTotalSize');
+  const checkpoints = document.getElementById('statCheckpoints');
+  
+  if (totalFiles) totalFiles.textContent = data.total_files || 0;
+  if (totalSize) totalSize.textContent = formatBytes(data.total_size || 0);
+  if (checkpoints) checkpoints.textContent = checkpoints_count || 0;
 };
 
 // Event Handlers
@@ -333,10 +476,21 @@ const initEventListeners = () => {
     fetchStatus();
     fetchCheckpoints();
     fetchDataFiles();
+    fetchStatistics();
     showToast('状态已刷新');
   });
 
   stopCrawlerBtn.addEventListener('click', stopCrawler);
+
+  const pauseCrawlerBtn = document.getElementById('pauseCrawlerBtn');
+  if (pauseCrawlerBtn) {
+    pauseCrawlerBtn.addEventListener('click', pauseCrawler);
+  }
+
+  const savePresetBtn = document.getElementById('savePresetBtn');
+  if (savePresetBtn) {
+    savePresetBtn.addEventListener('click', saveCurrentConfig);
+  }
 
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {
@@ -357,8 +511,16 @@ const initEventListeners = () => {
 
 // Initialize Application
 const init = async () => {
-  await Promise.all([fetchPlatforms(), fetchStatus(), fetchCheckpoints(), fetchDataFiles()]);
+  await Promise.all([
+    fetchPlatforms(), 
+    fetchStatus(), 
+    fetchCheckpoints(), 
+    fetchDataFiles(),
+    fetchPresets(),
+    fetchStatistics()
+  ]);
   initEventListeners();
+  renderPresets();
   addLog('欢迎使用 MediaCrawler 控制面板');
 };
 

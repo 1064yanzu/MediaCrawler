@@ -10,7 +10,6 @@
 
 import asyncio
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -80,7 +79,88 @@ class ResumeConfig(BaseModel):
     checkpoint_id: str = Field(..., description="检查点ID")
 
 
+class ConfigPreset(BaseModel):
+    name: str = Field(..., description="预设名称")
+    config: CrawlerConfig = Field(..., description="配置内容")
+
+
 # 辅助函数
+def get_presets_dir() -> Path:
+    """获取配置预设目录"""
+    presets_dir = Path("./config_presets")
+    presets_dir.mkdir(exist_ok=True)
+    return presets_dir
+
+
+def save_config_preset(name: str, config: CrawlerConfig) -> bool:
+    """保存配置预设"""
+    try:
+        presets_dir = get_presets_dir()
+        preset_file = presets_dir / f"{name}.json"
+        
+        with open(preset_file, "w", encoding="utf-8") as f:
+            json.dump(config.model_dump(), f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def load_config_presets() -> List[Dict[str, Any]]:
+    """加载所有配置预设"""
+    presets_dir = get_presets_dir()
+    presets = []
+    
+    for file in presets_dir.glob("*.json"):
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+                presets.append({
+                    "name": file.stem,
+                    "config": config_data
+                })
+        except Exception:
+            continue
+    
+    return presets
+
+
+def analyze_data_files() -> Dict[str, Any]:
+    """分析数据文件统计信息"""
+    data_dir = Path("./data")
+    if not data_dir.exists():
+        return {
+            "total_files": 0,
+            "total_size": 0,
+            "by_platform": {},
+            "by_type": {}
+        }
+    
+    stats = {
+        "total_files": 0,
+        "total_size": 0,
+        "by_platform": {},
+        "by_type": {"json": 0, "csv": 0}
+    }
+    
+    for file in data_dir.rglob("*"):
+        if file.is_file() and file.suffix in [".json", ".csv"]:
+            stats["total_files"] += 1
+            stats["total_size"] += file.stat().st_size
+            
+            # 统计类型
+            file_type = file.suffix[1:]
+            stats["by_type"][file_type] = stats["by_type"].get(file_type, 0) + 1
+            
+            # 统计平台
+            for platform in ["xhs", "dy", "ks", "bili", "wb", "tieba", "zhihu"]:
+                if platform in file.name:
+                    stats["by_platform"][platform] = stats["by_platform"].get(platform, 0) + 1
+                    break
+    
+    return stats
+
+
+
 def get_checkpoint_dir() -> Path:
     """获取检查点目录"""
     checkpoint_dir = Path("./checkpoint")
@@ -140,27 +220,35 @@ def list_checkpoints() -> List[Dict[str, Any]]:
     return checkpoints
 
 
-def get_data_files(platform: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_data_files(platform: Optional[str] = None, file_type: Optional[str] = None) -> List[Dict[str, Any]]:
     """获取爬取的数据文件列表"""
     data_dir = Path("./data")
     if not data_dir.exists():
         return []
     
     files = []
-    patterns = ["*.json", "*.csv"]
-    
-    for pattern in patterns:
-        for file in data_dir.glob(pattern):
-            if platform and platform not in file.name:
-                continue
-            
-            stat = file.stat()
-            files.append({
-                "name": file.name,
-                "size": stat.st_size,
-                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                "type": file.suffix[1:]
-            })
+    for file in data_dir.rglob("*"):
+        if not file.is_file() or file.suffix.lower() not in [".json", ".csv"]:
+            continue
+        
+        rel_path = file.relative_to(data_dir)
+        platform_name = rel_path.parts[0] if len(rel_path.parts) > 1 else None
+        
+        if platform and platform_name != platform:
+            continue
+        if file_type and file.suffix[1:] != file_type:
+            continue
+        
+        stat = file.stat()
+        files.append({
+            "name": file.name,
+            "path": str(rel_path).replace("\\", "/"),
+            "size": stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            "type": file.suffix[1:],
+            "platform": platform_name,
+            "directory": str(rel_path.parent).replace("\\", "/") if rel_path.parent != Path(".") else ""
+        })
     
     return sorted(files, key=lambda x: x["modified"], reverse=True)
 
@@ -339,6 +427,23 @@ async def get_checkpoints():
     return {"checkpoints": list_checkpoints()}
 
 
+@app.get("/api/checkpoints/download/{checkpoint_id}")
+async def download_checkpoint(checkpoint_id: str):
+    """下载检查点文件"""
+    checkpoint_dir = get_checkpoint_dir()
+    target_path = checkpoint_dir / f"{checkpoint_id}.json"
+    
+    if not target_path.exists():
+        # 兼容传入文件名的情况
+        alt_path = checkpoint_dir / checkpoint_id
+        if alt_path.exists():
+            target_path = alt_path
+        else:
+            raise HTTPException(status_code=404, detail="检查点不存在")
+    
+    return FileResponse(target_path, filename=target_path.name)
+
+
 @app.post("/api/crawler/resume")
 async def resume_crawler(resume_config: ResumeConfig, background_tasks: BackgroundTasks):
     """从检查点恢复爬虫"""
@@ -376,57 +481,189 @@ async def get_data_files_list(platform: Optional[str] = None):
     return {"files": get_data_files(platform)}
 
 
-@app.get("/api/data/download/{filename}")
-async def download_data_file(filename: str):
+@app.get("/api/data/download/{file_path:path}")
+async def download_data_file(file_path: str):
     """下载数据文件"""
-    file_path = Path("./data") / filename
+    data_dir = Path("./data")
+    target_path = data_dir / file_path
     
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
-    return FileResponse(file_path, filename=filename)
-
-
-@app.get("/api/data/preview/{filename}")
-async def preview_data_file(filename: str, limit: int = 100):
-    """预览数据文件"""
-    file_path = Path("./data") / filename
-    
-    if not file_path.exists():
+    if not target_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
     
     try:
-        if filename.endswith(".json"):
-            with open(file_path, "r", encoding="utf-8") as f:
+        target_path.resolve().relative_to(data_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="不允许访问此文件")
+    
+    return FileResponse(target_path, filename=target_path.name)
+
+
+@app.get("/api/data/preview/{file_path:path}")
+async def preview_data_file(file_path: str, limit: int = 100):
+    """预览数据文件"""
+    data_dir = Path("./data")
+    target_path = data_dir / file_path
+    
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    try:
+        target_path.resolve().relative_to(data_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="不允许访问此文件")
+    
+    try:
+        if target_path.suffix == ".json":
+            with open(target_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
+                    total = len(data)
                     data = data[:limit]
-                return {"data": data, "total": len(data)}
-        elif filename.endswith(".csv"):
-            import pandas as pd
-            df = pd.read_csv(file_path, nrows=limit)
+                    return {"data": data, "total": total, "truncated": total > limit}
+                else:
+                    return {"data": data, "total": 1, "truncated": False}
+        elif target_path.suffix == ".csv":
+            rows = []
+            total = 0
+            try:
+                import pandas as pd  # type: ignore
+                df = pd.read_csv(target_path)
+                total = len(df)
+                rows = df.head(limit).to_dict(orient="records")
+                columns = list(df.columns)
+            except ImportError:
+                import csv
+                with open(target_path, "r", encoding="utf-8-sig", newline="") as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    for idx, row in enumerate(reader, start=1):
+                        if idx <= limit:
+                            rows.append(row)
+                        total = idx
+                    columns = reader.fieldnames or []
             return {
-                "data": df.to_dict(orient="records"),
-                "total": len(df),
-                "columns": list(df.columns)
+                "data": rows,
+                "total": total,
+                "columns": columns,
+                "truncated": total > limit
             }
+        else:
+            raise HTTPException(status_code=400, detail="不支持的文件类型")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
 
 
-@app.delete("/api/data/delete/{filename}")
-async def delete_data_file(filename: str):
+@app.delete("/api/data/delete/{file_path:path}")
+async def delete_data_file(file_path: str):
     """删除数据文件"""
-    file_path = Path("./data") / filename
+    data_dir = Path("./data")
+    target_path = data_dir / file_path
     
-    if not file_path.exists():
+    if not target_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
     
+    # 安全检查：确保文件在data目录内
     try:
-        file_path.unlink()
-        return {"status": "success", "message": f"文件 {filename} 已删除"}
+        target_path.resolve().relative_to(data_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="不允许访问此文件")
+    
+    try:
+        target_path.unlink()
+        return {"status": "success", "message": f"文件 {target_path.name} 已删除"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
+
+
+@app.get("/api/stats")
+async def get_statistics():
+    """获取统计信息"""
+    try:
+        data_stats = analyze_data_files()
+        checkpoints = list_checkpoints()
+        
+        return {
+            "data": data_stats,
+            "checkpoints_count": len(checkpoints),
+            "crawler_status": crawler_status
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
+
+
+@app.get("/api/presets")
+async def get_config_presets():
+    """获取配置预设列表"""
+    return {"presets": load_config_presets()}
+
+
+@app.post("/api/presets")
+async def save_preset(preset: ConfigPreset):
+    """保存配置预设"""
+    if save_config_preset(preset.name, preset.config):
+        return {"status": "success", "message": f"配置预设 {preset.name} 已保存"}
+    else:
+        raise HTTPException(status_code=500, detail="保存配置预设失败")
+
+
+@app.delete("/api/presets/{name}")
+async def delete_preset(name: str):
+    """删除配置预设"""
+    try:
+        preset_file = get_presets_dir() / f"{name}.json"
+        if preset_file.exists():
+            preset_file.unlink()
+            return {"status": "success", "message": f"配置预设 {name} 已删除"}
+        else:
+            raise HTTPException(status_code=404, detail="配置预设不存在")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除配置预设失败: {str(e)}")
+
+
+@app.get("/api/logs")
+async def get_logs(limit: int = 100):
+    """获取最近的日志（从日志文件读取）"""
+    try:
+        log_lines = []
+        log_files = sorted(Path("./").glob("*.log"), key=lambda x: x.stat().st_mtime, reverse=True)
+        
+        if log_files:
+            with open(log_files[0], "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                log_lines = lines[-limit:] if len(lines) > limit else lines
+        
+        return {
+            "logs": log_lines,
+            "count": len(log_lines)
+        }
+    except Exception as e:
+        return {"logs": [], "count": 0, "error": str(e)}
+
+
+@app.post("/api/crawler/pause")
+async def pause_crawler():
+    """暂停爬虫（保存检查点但不停止）"""
+    global crawler_status
+    
+    if not crawler_status["running"]:
+        raise HTTPException(status_code=400, detail="爬虫未在运行")
+    
+    # 保存检查点
+    if crawler_status["platform"]:
+        checkpoint_id = save_checkpoint(crawler_status["platform"], {
+            "progress": crawler_status["progress"],
+            "paused": True
+        })
+        crawler_status["last_checkpoint"] = checkpoint_id
+        
+        return {
+            "status": "paused",
+            "message": "已保存检查点",
+            "checkpoint": checkpoint_id
+        }
+    
+    raise HTTPException(status_code=500, detail="无法保存检查点")
 
 
 # 挂载静态文件

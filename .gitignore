@@ -179,3 +179,8 @@ agent_zone
 debug_tools
 
 database/*.db
+
+# MediaCrawler v2.0 新增目录
+checkpoint/
+config_presets/
+test_checkpoint/

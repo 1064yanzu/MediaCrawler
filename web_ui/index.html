@@ -43,6 +43,11 @@
                     </div>
                 </div>
 
+                <div class="preset-toolbar">
+                    <button type="button" class="btn btn-outline" id="savePresetBtn">保存为预设</button>
+                    <div class="preset-selector" id="presetContainer"></div>
+                </div>
+
                 <form id="crawlerForm" class="form-grid">
                     <div class="form-field">
                         <label for="platform">平台</label>
@@ -116,6 +121,7 @@
 
                     <div class="form-actions">
                         <button type="submit" class="btn btn-primary" id="startCrawlerBtn">启动爬虫</button>
+                        <button type="button" class="btn btn-outline" id="pauseCrawlerBtn">暂停并保存进度</button>
                         <button type="button" class="btn btn-outline" id="stopCrawlerBtn">停止爬虫</button>
                     </div>
                 </form>
@@ -146,6 +152,21 @@
                         <div class="status-card">
                             <span class="label">已爬评论</span>
                             <strong id="commentsCount">0</strong>
+                        </div>
+                    </div>
+
+                    <div class="stats-container" id="statsContainer">
+                        <div class="stat-card">
+                            <div class="stat-value" id="statTotalFiles">0</div>
+                            <div class="stat-label">数据文件数量</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statTotalSize">0 MB</div>
+                            <div class="stat-label">数据占用</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statCheckpoints">0</div>
+                            <div class="stat-label">检查点数量</div>
                         </div>
                     </div>
 
