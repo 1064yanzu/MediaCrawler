@@ -64,6 +64,11 @@
 | 贴吧   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
 | 知乎   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
 
+### 🖥️ 现代可视化控制面板 & API
+- 🆕 **Web UI 控制台**：位于项目根目录的 `web_ui/`，通过 `uv run python api_server.py` 启动后访问 `http://localhost:8000` 即可进行可视化控制、实时监控与数据预览
+- 🆕 **RESTful API 接口**：所有功能均可通过外部应用调用，详情参考《[API & Web UI 使用指南](API_GUIDE.md)》
+- 🆕 **断点续爬能力**：自动保存爬取进度，即使中断也可继续执行，保障数据采集稳定
+
 
 
 ### 🚀 MediaCrawlerPro 重磅发布！
@@ -150,6 +155,18 @@ uv run main.py --platform xhs --lt qrcode --type detail
 # 其他平台爬虫使用示例，执行下面的命令查看
 uv run main.py --help
 ```
+
+### 🌐 启动 Web UI 与 API 服务
+
+```shell
+# 启动 FastAPI 服务（默认端口 8000）
+uv run python api_server.py
+
+# 或直接使用 Python
+python api_server.py
+```
+
+启动后访问 `http://localhost:8000` 可以直接使用现代控制面板，访问 `http://localhost:8000/docs` 可以查看接口文档。详细使用说明参考《[API & Web UI 使用指南](API_GUIDE.md)》。
 
 <details>
 <summary>🔗 <strong>使用 Python 原生 venv 管理环境（不推荐）</strong></summary>
