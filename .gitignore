@@ -184,3 +184,7 @@ database/*.db
 checkpoint/
 config_presets/
 test_checkpoint/
+reports/
+temp_configs/
+runtime/
+logs/
